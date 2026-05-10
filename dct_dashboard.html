@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DCT Pipeline — Delegation Audit Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.7.1/ethers.umd.min.js"></script>
+<style>
+  :root {
+    --bg:     #080c0f;
+    --bg2:    #0d1318;
+    --bg3:    #111820;
+    --border: #1e2e38;
+    --green:  #00e5a0;
+    --green2: #00b37a;
+    --amber:  #f5a623;
+    --red:    #ff4d6d;
+    --blue:   #38bdf8;
+    --muted:  #3a5060;
+    --text:   #c8dce8;
+    --dim:    #5a7888;
+    --mono:   'Share Tech Mono', monospace;
+    --sans:   'Syne', sans-serif;
+    --hdr:    52px;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+  }
+
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(0,229,160,0.015) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,229,160,0.015) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ── HEADER ─────────────────────────────────── */
+  header {
+    position: relative; z-index: 10;
+    height: var(--hdr);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 24px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(8,12,15,0.97);
+    flex-shrink: 0;
+  }
+  .logo { font-family: var(--sans); font-weight: 800; font-size: 1rem; letter-spacing: .08em; color: var(--green); }
+  .logo span { color: var(--text); font-weight: 400; }
+  .hdr-meta { display: flex; gap: 20px; align-items: center; font-size: .68rem; color: var(--dim); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); display: inline-block; margin-right: 5px; }
+  .dot.on  { background: var(--green); box-shadow: 0 0 7px var(--green); animation: blink 2s infinite; }
+  .dot.err { background: var(--red); }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+  /* ── SHELL: full-height flex row under header ── */
+  .shell {
+    position: relative; z-index: 1;
+    display: flex;
+    height: calc(100vh - var(--hdr));
+    overflow: hidden;
+  }
+
+  /* ── LEFT PANEL ─────────────────────────────── */
+  /* Fixed width, flex column. Top scrolls, bottom is pinned. */
+  .left {
+    width: 390px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* scrollable config + task */
+  .left-scroll {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    min-height: 0;
+  }
+  .left-scroll::-webkit-scrollbar { width: 3px; }
+  .left-scroll::-webkit-scrollbar-thumb { background: var(--muted); }
+
+  /* pinned: run button + log feed */
+  .left-foot {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid var(--border);
+    /* log feed takes whatever space is left, up to a cap */
+    height: 38%;
+    min-height: 160px;
+    max-height: 340px;
+  }
+
+  /* ── RIGHT PANEL ────────────────────────────── */
+  .right {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* stats strip – shrink 0 */
+  .stats-bar {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .stat { flex: 1; padding: 10px 16px; border-right: 1px solid var(--border); }
+  .stat:last-child { border-right: none; }
+  .stat-lbl { font-size: .57rem; color: var(--dim); letter-spacing: .1em; text-transform: uppercase; }
+  .stat-val { font-family: var(--sans); font-weight: 800; font-size: 1.35rem; color: var(--green); line-height: 1.15; }
+  .stat-val.am { color: var(--amber); }
+  .stat-val.bl { color: var(--blue); }
+
+  /* tree: takes 55% of right column height */
+  .panel-tree {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex: 0 0 55%;
+    border-bottom: 1px solid var(--border);
+    min-height: 0;
+  }
+
+  /* audit: fills remaining space */
+  .panel-audit {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* ── SHARED ─────────────────────────────────── */
+  .ph {
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: .6rem; letter-spacing: .14em; color: var(--dim); text-transform: uppercase;
+    display: flex; align-items: center; gap: 7px;
+    flex-shrink: 0;
+  }
+  .ph .ic { font-size: .82rem; }
+  .ic-g { color: var(--green); }
+  .ic-a { color: var(--amber); }
+
+  .section {
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .lbl {
+    font-size: .58rem; color: var(--dim); letter-spacing: .1em;
+    text-transform: uppercase; margin-bottom: 4px;
+  }
+
+  input, select, textarea {
+    width: 100%;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: .68rem;
+    padding: 7px 9px;
+    border-radius: 3px;
+    outline: none;
+    transition: border-color .18s;
+  }
+  input:focus, select:focus, textarea:focus { border-color: var(--green2); }
+  input::placeholder, textarea::placeholder { color: var(--muted); }
+
+  textarea {
+    color: var(--green);
+    height: 140px;
+    resize: none;
+    line-height: 1.6;
+  }
+
+  .presets { display: flex; gap: 5px; flex-wrap: wrap; margin: 5px 0 6px; }
+  .pbtn {
+    font-family: var(--mono); font-size: .58rem;
+    padding: 2px 7px;
+    background: transparent; border: 1px solid var(--border);
+    color: var(--dim); border-radius: 2px; cursor: pointer; transition: all .14s;
+  }
+  .pbtn:hover { border-color: var(--amber); color: var(--amber); }
+
+  /* connect button */
+  .btn-connect {
+    width: 100%; margin-top: 8px; padding: 8px;
+    background: transparent; border: 1px solid var(--blue);
+    color: var(--blue); font-family: var(--mono); font-size: .68rem;
+    letter-spacing: .08em; cursor: pointer; border-radius: 3px; transition: all .18s;
+  }
+  .btn-connect:hover { background: var(--blue); color: #080c0f; }
+
+  /* run button – inside left-foot, always visible */
+  .run-wrap {
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .btn-run {
+    width: 100%; padding: 10px;
+    background: transparent; border: 1px solid var(--green);
+    color: var(--green); font-family: var(--mono); font-size: .76rem;
+    letter-spacing: .1em; cursor: pointer; border-radius: 3px;
+    transition: background .18s, color .18s; position: relative; overflow: hidden;
+  }
+  .btn-run::before {
+    content: ''; position: absolute; inset: 0;
+    background: var(--green); transform: scaleX(0); transform-origin: left;
+    transition: transform .18s; z-index: 0;
+  }
+  .btn-run > span { position: relative; z-index: 1; }
+  .btn-run:not(:disabled):hover { color: #080c0f; }
+  .btn-run:not(:disabled):hover::before { transform: scaleX(1); }
+  .btn-run:disabled { border-color: var(--muted); color: var(--muted); cursor: not-allowed; }
+  .btn-run:disabled::before { display: none; }
+  .btn-run.running { border-color: var(--amber); color: var(--amber); animation: runglow 1.2s ease-in-out infinite; }
+  .btn-run.running::before { display: none; }
+  @keyframes runglow { 0%,100%{box-shadow:none} 50%{box-shadow:0 0 12px rgba(245,166,35,.35)} }
+
+  /* log feed */
+  .log-feed {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 7px 13px;
+    font-size: .62rem;
+    line-height: 1.75;
+    min-height: 0;
+  }
+  .log-feed::-webkit-scrollbar { width: 3px; }
+  .log-feed::-webkit-scrollbar-thumb { background: var(--muted); }
+
+  .le { display: flex; gap: 7px; animation: fi .22s ease; }
+  @keyframes fi { from{opacity:0;transform:translateY(3px)} to{opacity:1} }
+  .lt { color: var(--muted); flex-shrink: 0; }
+  .lm.chain { color: var(--green); }
+  .lm.agent { color: var(--blue); }
+  .lm.error { color: var(--red); }
+  .lm.warn  { color: var(--amber); }
+  .lm.dim   { color: var(--dim); }
+
+  /* tree canvas */
+  .tree-wrap {
+    flex: 1; overflow: auto; padding: 14px; min-height: 0;
+  }
+  .tree-wrap::-webkit-scrollbar { width: 4px; height: 4px; }
+  .tree-wrap::-webkit-scrollbar-thumb { background: var(--muted); }
+
+  .empty {
+    height: 100%; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    color: var(--muted); font-size: .68rem; gap: 6px; text-align: center;
+  }
+  .empty-ico { font-size: 2.2rem; opacity: .18; }
+
+  .btn-refresh {
+    margin-left: auto; font-family: var(--mono); font-size: .58rem;
+    padding: 3px 8px; background: transparent;
+    border: 1px solid var(--border); color: var(--dim);
+    border-radius: 2px; cursor: pointer; transition: all .14s;
+  }
+  .btn-refresh:hover { border-color: var(--green); color: var(--green); }
+
+  /* audit table */
+  .table-wrap {
+    flex: 1; overflow-y: auto; min-height: 0;
+  }
+  .table-wrap::-webkit-scrollbar { width: 3px; }
+  .table-wrap::-webkit-scrollbar-thumb { background: var(--muted); }
+
+  table { width: 100%; border-collapse: collapse; font-size: .61rem; }
+  th {
+    text-align: left; padding: 6px 13px;
+    color: var(--dim); letter-spacing: .08em; text-transform: uppercase;
+    font-weight: normal; border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; background: var(--bg2); z-index: 2;
+  }
+  td { padding: 5px 13px; border-bottom: 1px solid rgba(30,46,56,.4); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  tr:hover td { background: rgba(0,229,160,.025); }
+
+  .badge { display: inline-block; padding: 1px 6px; border-radius: 2px; font-size: .57rem; letter-spacing: .05em; }
+  .bm { background: rgba(245,166,35,.1);  color: var(--amber); border: 1px solid rgba(245,166,35,.3); }
+  .bc { background: rgba(56,189,248,.1);  color: var(--blue);  border: 1px solid rgba(56,189,248,.3); }
+  .bt { background: rgba(0,229,160,.08);  color: var(--green); border: 1px solid rgba(0,229,160,.3); }
+  .bp { background: rgba(0,229,160,.06);  color: var(--green2); }
+  .bf { background: rgba(255,77,109,.08); color: var(--red); }
+  .ba { background: rgba(56,189,248,.06); color: var(--blue); }
+
+  /* tooltip */
+  .tooltip {
+    position: fixed; display: none;
+    background: var(--bg2); border: 1px solid var(--border);
+    padding: 9px 13px; font-size: .62rem; color: var(--text);
+    pointer-events: none; z-index: 999; min-width: 210px; line-height: 1.85;
+  }
+  .tooltip.show { display: block; }
+  .tt-title { color: var(--green); font-size: .68rem; margin-bottom: 4px; }
+  .tt-row { display: flex; gap: 8px; }
+  .tt-k { color: var(--dim); flex-shrink: 0; width: 58px; }
+
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<div id="tooltip" class="tooltip">
+  <div class="tt-title" id="tt-title"></div>
+  <div class="tt-row"><span class="tt-k">scope</span><span id="tt-scope"></span></div>
+  <div class="tt-row"><span class="tt-k">delegatee</span><span id="tt-addr"></span></div>
+  <div class="tt-row"><span class="tt-k">task</span><span id="tt-task"></span></div>
+  <div class="tt-row"><span class="tt-k">status</span><span id="tt-status"></span></div>
+</div>
+
+<header>
+  <div class="logo">DCT <span>// Parallel Agent Delegation Dashboard</span></div>
+  <div class="hdr-meta">
+    <div><span class="dot" id="conn-dot"></span><span id="conn-lbl">disconnected</span></div>
+    <span id="hdr-contract">no contract</span>
+    <span id="hdr-block">—</span>
+  </div>
+</header>
+
+<div class="shell">
+
+  <!-- ══════ LEFT ══════ -->
+  <div class="left">
+    <div class="ph"><span class="ic ic-a">⬡</span> Pipeline Launcher <span style="color:var(--amber);font-size:.55rem;margin-left:6px">DEMO MODE</span></div>
+
+    <!-- scrollable config -->
+    <div class="left-scroll">
+
+      <div class="section">
+        <div class="lbl">Network</div>
+        <select id="net-sel" onchange="onNetChange()">
+          <option value="local">Local — Hardhat</option>
+          <option value="sepolia">Sepolia Testnet</option>
+        </select>
+
+        <div style="margin-top:8px">
+          <div class="lbl">RPC URL</div>
+          <input id="rpc" type="text" value="http://127.0.0.1:8545">
+        </div>
+        <div style="margin-top:8px">
+          <div class="lbl">Contract Address</div>
+          <input id="addr" type="text" placeholder="0x…">
+        </div>
+        <div style="margin-top:8px">
+          <div class="lbl">Ollama Model</div>
+          <input id="ollama-model" type="text" value="llama3.2" placeholder="e.g. llama3.2, mistral">
+        </div>
+        <button class="btn-connect" onclick="connectChain()">CONNECT TO CHAIN</button>
+      </div>
+
+      <div class="section">
+        <div class="lbl">Coding Task</div>
+        <div class="presets">
+          <button class="pbtn" onclick="preset('queue')">Task Queue</button>
+          <button class="pbtn" onclick="preset('cache')">LRU Cache</button>
+          <button class="pbtn" onclick="preset('parser')">CSV Parser</button>
+          <button class="pbtn" onclick="preset('calc')">Calculator</button>
+        </div>
+        <div style="position:relative">
+          <textarea id="task" spellcheck="false">Build a Python module that implements a simple in-memory task queue with the following requirements:
+- A TaskQueue class with methods: enqueue(task), dequeue(), peek(), is_empty(), size()
+- Tasks are strings
+- dequeue() and peek() raise an IndexError if the queue is empty
+- The queue should be FIFO (first in, first out)
+- Include a method to list all current tasks without removing them</textarea>
+          <div id="ccount" style="position:absolute;bottom:7px;right:9px;font-size:.55rem;color:var(--muted)"></div>
+        </div>
+      </div>
+
+    </div><!-- /left-scroll -->
+
+    <!-- PINNED FOOT: always visible -->
+    <div class="left-foot">
+      <div class="run-wrap">
+        <button class="btn-run" id="run-btn" onclick="runPipeline()" disabled>
+          <span>▶ SHOW RUN DEMO</span>
+        </button>
+      </div>
+      <div class="log-feed" id="log"></div>
+    </div>
+
+  </div>
+
+  <!-- ══════ RIGHT ══════ -->
+  <div class="right">
+
+    <div class="stats-bar">
+      <div class="stat"><div class="stat-lbl">Total DCTs</div><div class="stat-val" id="s-tok">—</div></div>
+      <div class="stat"><div class="stat-lbl">Actions</div><div class="stat-val am" id="s-act">—</div></div>
+      <div class="stat"><div class="stat-lbl">Active</div><div class="stat-val bl" id="s-act2">—</div></div>
+      <div class="stat"><div class="stat-lbl">Completed</div><div class="stat-val" id="s-done">—</div></div>
+    </div>
+
+    <div class="panel-tree">
+      <div class="ph">
+        <span class="ic ic-g">◈</span> Delegation Chain
+        <button class="btn-refresh" onclick="refresh()">↻ Refresh</button>
+      </div>
+      <div class="tree-wrap" id="tree-wrap">
+        <div class="empty">
+          <div class="empty-ico">◈</div>
+          <div>No tokens on chain yet</div>
+          <div style="font-size:.58rem;color:var(--muted);margin-top:3px">Connect and run a pipeline to visualize the delegation tree</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel-audit">
+      <div class="ph"><span class="ic ic-a">≡</span> On-Chain Action Log</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Token</th><th>Agent</th><th>Action</th><th>Details</th><th>Time</th></tr>
+          </thead>
+          <tbody id="audit-body">
+            <tr><td colspan="5" style="color:var(--muted);text-align:center;padding:14px">No actions recorded</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+const SCOPE=['MANAGE','CODE','TEST'];
+const SCOL={MANAGE:'#f5a623',CODE:'#38bdf8',TEST:'#00e5a0'};
+const PRESETS={
+  queue:`Build a Python module that implements a simple in-memory task queue with the following requirements:\n- A TaskQueue class with methods: enqueue(task), dequeue(), peek(), is_empty(), size()\n- Tasks are strings\n- dequeue() and peek() raise an IndexError if the queue is empty\n- The queue should be FIFO (first in, first out)\n- Include a method to list all current tasks without removing them`,
+  cache:`Build a Python module implementing an LRU (Least Recently Used) cache with:\n- An LRUCache class initialized with a capacity integer\n- get(key) method: returns value or -1 if not found, marks as recently used\n- put(key, value) method: inserts/updates, evicts LRU entry when at capacity\n- Both operations should run in O(1) time using OrderedDict\n- size() and capacity() accessor methods`,
+  parser:`Build a Python CSV parser module with:\n- parse_csv(text) function that returns a list of dicts (first row = headers)\n- Handles quoted fields containing commas and newlines\n- strip_whitespace option (default True)\n- to_csv(rows) function that serializes a list of dicts back to CSV\n- Raises ValueError for malformed input`,
+  calc:`Build a Python calculator module with:\n- evaluate(expression) function that parses and evaluates math expression strings\n- Supports +, -, *, / and parentheses with correct precedence\n- Handles floats and negative numbers\n- Raises ValueError for division by zero and invalid expressions\n- No eval() — implement a proper recursive descent parser`
+};
+const ABI=[
+  "function totalTokens() view returns (uint256)",
+  "function tokens(uint256) view returns (uint256 id,uint256 parentId,address delegator,address delegatee,uint8 scope,string taskDescription,uint256 issuedAt,uint256 expiresAt,bool revoked,bool completed)",
+  "function getAllActions() view returns (tuple(uint256 tokenId,address agent,string actionType,string details,uint256 timestamp)[])"
+];
+
+let provider=null, contract=null, pollTimer=null;
+
+// char count
+const taskEl=document.getElementById('task');
+const ccEl=document.getElementById('ccount');
+function updateCC(){ ccEl.textContent=taskEl.value.length+' ch'; }
+taskEl.addEventListener('input',updateCC); updateCC();
+
+function preset(k){ taskEl.value=PRESETS[k]; updateCC(); }
+
+function onNetChange(){
+  const v=document.getElementById('net-sel').value;
+  document.getElementById('rpc').value=v==='local'?'http://127.0.0.1:8545':'https://eth-sepolia.g.alchemy.com/v2/YOUR_KEY';
+}
+
+// ── connect ──────────────────────────────────────────────────
+async function connectChain(){
+  const rpc=document.getElementById('rpc').value.trim();
+  const addr=document.getElementById('addr').value.trim();
+  if(!addr){ log('warn','Enter contract address first'); return; }
+  log('dim','Connecting to '+rpc.slice(0,40)+'…');
+  setDot('…');
+  try{
+    provider=new ethers.JsonRpcProvider(rpc);
+    await provider.getBlockNumber();
+    contract=new ethers.Contract(addr,ABI,provider);
+    const n=await contract.totalTokens();
+    setDot('on');
+    document.getElementById('hdr-contract').textContent=addr.slice(0,10)+'…'+addr.slice(-6);
+    log('chain','Connected — '+n+' token(s) on chain');
+    document.getElementById('run-btn').disabled=false;
+    startPoll();
+    refresh();
+  }catch(e){
+    setDot('err');
+    log('error','Failed: '+e.message);
+  }
+}
+
+function setDot(s){
+  const d=document.getElementById('conn-dot');
+  const l=document.getElementById('conn-lbl');
+  d.className='dot'+(s==='on'?' on':s==='err'?' err':'');
+  l.textContent=s==='on'?'connected':s==='err'?'error':'connecting…';
+}
+
+function startPoll(){
+  if(pollTimer) clearInterval(pollTimer);
+  pollTimer=setInterval(async()=>{
+    try{
+      const bn=await provider.getBlockNumber();
+      document.getElementById('hdr-block').textContent='block #'+bn;
+      refresh();
+    }catch{}
+  },5000);
+}
+
+// ── refresh ───────────────────────────────────────────────────
+async function refresh(){
+  if(!contract) return;
+  try{
+    const total=Number(await contract.totalTokens());
+    const tokens=[];
+    for(let i=1;i<=total;i++){
+      const t=await contract.tokens(i);
+      tokens.push({
+        id:Number(t.id), parentId:Number(t.parentId),
+        delegator:t.delegator, delegatee:t.delegatee,
+        scope:SCOPE[Number(t.scope)]||String(t.scope),
+        task:t.taskDescription, revoked:t.revoked, completed:t.completed,
+      });
+    }
+    const rawA=await contract.getAllActions();
+    const actions=rawA.map(a=>({
+      tokenId:Number(a.tokenId), agent:a.agent,
+      actionType:a.actionType, details:a.details, timestamp:Number(a.timestamp)
+    }));
+    const active=tokens.filter(t=>!t.revoked&&!t.completed).length;
+    const done=tokens.filter(t=>t.completed).length;
+    document.getElementById('s-tok').textContent=total;
+    document.getElementById('s-act').textContent=actions.length;
+    document.getElementById('s-act2').textContent=active;
+    document.getElementById('s-done').textContent=done;
+    renderTree(tokens);
+    renderAudit(actions);
+  }catch(e){ log('error','Refresh: '+e.message); }
+}
+
+// ── tree ──────────────────────────────────────────────────────
+function renderTree(tokens){
+  const wrap=document.getElementById('tree-wrap');
+  if(!tokens.length){
+    wrap.innerHTML=`<div class="empty"><div class="empty-ico">◈</div><div>No tokens on chain yet</div></div>`;
+    return;
+  }
+  const NW=160,NH=56,HG=44,VG=72;
+  const byPar={};
+  tokens.forEach(t=>{(byPar[t.parentId]||(byPar[t.parentId]=[])).push(t);});
+  const pos={}; let maxX=0,maxY=0;
+  function layout(id,x,y){
+    pos[id]={x,y};
+    if(x>maxX)maxX=x; if(y>maxY)maxY=y;
+    const kids=byPar[id]||[];
+    const tw=kids.length*(NW+HG)-HG;
+    let cx=x-tw/2+NW/2;
+    kids.forEach(k=>{layout(k.id,cx,y+NH+VG);cx+=NW+HG;});
+  }
+  const roots=tokens.filter(t=>t.parentId===0);
+  let rx=20;
+  roots.forEach(r=>{layout(r.id,rx,58);rx+=NW+HG+60;});
+  const W=Math.max(maxX+NW+40,340);
+  const H=maxY+NH+40;
+  const hx=roots.length===1?pos[roots[0].id].x+NW/2:W/2;
+  const hy=6;
+  let s=`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" style="overflow:visible;display:block">`;
+  // human
+  s+=`<rect x="${hx-56}" y="${hy}" width="112" height="32" rx="2" fill="rgba(255,255,255,.04)" stroke="rgba(255,255,255,.14)" stroke-width="1"/>`;
+  s+=`<text x="${hx}" y="${hy+13}" text-anchor="middle" fill="rgba(255,255,255,.45)" font-family="Share Tech Mono,monospace" font-size="9" letter-spacing="1">HUMAN PRINCIPAL</text>`;
+  s+=`<text x="${hx}" y="${hy+26}" text-anchor="middle" fill="rgba(255,255,255,.22)" font-family="Share Tech Mono,monospace" font-size="8">deployer wallet</text>`;
+  // edges human→roots
+  roots.forEach(r=>{
+    const tx=pos[r.id].x+NW/2,ty=pos[r.id].y;
+    s+=`<line x1="${hx}" y1="${hy+32}" x2="${tx}" y2="${ty}" stroke="rgba(255,255,255,.1)" stroke-width="1" stroke-dasharray="4 3"/>`;
+  });
+  // token edges
+  tokens.forEach(t=>{
+    if(!t.parentId||!pos[t.parentId]||!pos[t.id])return;
+    const px=pos[t.parentId].x+NW/2,py=pos[t.parentId].y+NH;
+    const cx=pos[t.id].x+NW/2,cy=pos[t.id].y;
+    const col=SCOL[t.scope]||'#fff';
+    const mid=(py+cy)/2;
+    s+=`<path d="M${px},${py} C${px},${mid} ${cx},${mid} ${cx},${cy}" fill="none" stroke="${col}" stroke-width="1.5" stroke-opacity=".32"/>`;
+    s+=`<polygon points="${cx},${cy} ${cx-4},${cy-8} ${cx+4},${cy-8}" fill="${col}" opacity=".45"/>`;
+  });
+  // nodes
+  tokens.forEach(t=>{
+    if(!pos[t.id])return;
+    const {x,y}=pos[t.id];
+    const col=SCOL[t.scope]||'#fff';
+    const opa=t.revoked?.28:1;
+    const stcol=t.revoked?'#ff4d6d':t.completed?'#00e5a0':'#38bdf8';
+    const da=`data-id="${t.id}" data-scope="${t.scope}" data-addr="${t.delegatee}" data-task="${t.task.replace(/"/g,'&quot;').slice(0,60)}" data-status="${t.revoked?'revoked':t.completed?'completed':'active'}"`;
+    s+=`<g ${da} opacity="${opa}" style="cursor:pointer" onmouseenter="showTip(event,this)" onmouseleave="hideTip()">`;
+    s+=`<rect x="${x}" y="${y}" width="${NW}" height="${NH}" rx="3" fill="rgba(13,19,24,.95)" stroke="${col}" stroke-width="1.5" stroke-opacity=".55"/>`;
+    s+=`<rect x="${x}" y="${y+2}" width="3" height="${NH-4}" rx="1" fill="${col}" opacity=".8"/>`;
+    s+=`<circle cx="${x+NW-11}" cy="${y+12}" r="4" fill="${stcol}" opacity=".9"/>`;
+    s+=`<text x="${x+10}" y="${y+15}" font-family="Share Tech Mono,monospace" font-size="8.5" fill="${col}" opacity=".6" letter-spacing="1">TOKEN #${t.id}</text>`;
+    s+=`<text x="${x+10}" y="${y+31}" font-family="Share Tech Mono,monospace" font-size="12" fill="${col}" font-weight="bold">${t.scope}</text>`;
+    const sa=t.delegatee.slice(0,6)+'…'+t.delegatee.slice(-4);
+    s+=`<text x="${x+10}" y="${y+47}" font-family="Share Tech Mono,monospace" font-size="8" fill="rgba(200,220,232,.32)">${sa}</text>`;
+    s+=`</g>`;
+  });
+  s+=`</svg>`;
+  wrap.innerHTML=s;
+}
+
+// ── tooltip ───────────────────────────────────────────────────
+function showTip(e,el){
+  const t=document.getElementById('tooltip');
+  document.getElementById('tt-title').textContent='Token #'+el.dataset.id;
+  document.getElementById('tt-scope').textContent=el.dataset.scope;
+  document.getElementById('tt-addr').textContent=el.dataset.addr.slice(0,16)+'…';
+  document.getElementById('tt-task').textContent=el.dataset.task;
+  document.getElementById('tt-status').textContent=el.dataset.status;
+  t.classList.add('show'); posTip(e);
+}
+function posTip(e){
+  const t=document.getElementById('tooltip');
+  t.style.left=(e.clientX+14)+'px'; t.style.top=(e.clientY+12)+'px';
+}
+function hideTip(){ document.getElementById('tooltip').classList.remove('show'); }
+document.addEventListener('mousemove',e=>{
+  if(document.getElementById('tooltip').classList.contains('show')) posTip(e);
+});
+
+// ── audit table ───────────────────────────────────────────────
+function renderAudit(actions){
+  const tb=document.getElementById('audit-body');
+  if(!actions.length){
+    tb.innerHTML='<tr><td colspan="5" style="color:var(--muted);text-align:center;padding:14px">No actions recorded</td></tr>';
+    return;
+  }
+  tb.innerHTML=[...actions].reverse().map(a=>{
+    const bc=a.actionType.includes('DELEGAT')?'bm'
+            :a.actionType.includes('CODE')||a.actionType.includes('IMPL')?'bc'
+            :a.actionType.includes('TEST')?'bt'
+            :a.actionType.includes('PASS')?'bp'
+            :a.actionType.includes('FAIL')?'bf':'ba';
+    const ts=new Date(a.timestamp*1000).toLocaleTimeString();
+    const det=a.details.length>55?a.details.slice(0,55)+'…':a.details;
+    return `<tr>
+      <td>#${a.tokenId}</td>
+      <td title="${a.agent}">${a.agent.slice(0,7)}…${a.agent.slice(-4)}</td>
+      <td><span class="badge ${bc}">${a.actionType}</span></td>
+      <td title="${a.details.replace(/"/g,'&quot;')}">${det}</td>
+      <td>${ts}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── logger ────────────────────────────────────────────────────
+function log(type,msg){
+  const f=document.getElementById('log');
+  const now=new Date().toLocaleTimeString();
+  const d=document.createElement('div');
+  d.className='le';
+  d.innerHTML=`<span class="lt">${now}</span><span class="lm ${type}">${msg}</span>`;
+  f.appendChild(d);
+  f.scrollTop=f.scrollHeight;
+}
+
+// ── demo pipeline animation (not real execution — run from terminal) ─────────
+async function runPipeline(){
+  const task=document.getElementById('task').value.trim();
+  const model=document.getElementById('ollama-model').value.trim()||'llama3.2';
+  const rpc=document.getElementById('rpc').value.trim();
+  const net=document.getElementById('net-sel').value;
+  if(!task){ log('warn','Enter a coding task first'); return; }
+
+  const btn=document.getElementById('run-btn');
+  btn.disabled=true; btn.classList.add('running');
+  btn.querySelector('span').textContent='⟳ DEMO RUNNING…';
+
+  log('agent','═══ Pipeline demo (animated) ═══');
+  log('dim','This is a visualization — run the real pipeline from your terminal');
+  log('dim','Network: '+net.toUpperCase());
+  log('dim','Task: '+task.slice(0,70)+(task.length>70?'…':''));
+
+  // Parallel coder pipeline demo stages
+  const stages=[
+    [400,  'chain','[chain] Connecting to node…'],
+    [900,  'chain','[chain] mintRoot → MANAGE token #1 for Manager…'],
+    [1400, 'agent','[ManagerAgent] Splitting task into 2 subtasks via Ollama…'],
+    [3200, 'agent','[ManagerAgent] Split complete — delegating to Coder A + Coder B'],
+    [3800, 'chain','[chain] delegate → token #2 (CODE / Module A) parent=#1 ✓'],
+    [4000, 'chain','[chain] delegate → token #3 (CODE / Module B) parent=#1 ✓'],
+    [4200, 'agent','[Coder A] ◄─ running in parallel ─► [Coder B]'],
+    [4400, 'agent','[Coder A] Implementing module_a.py…'],
+    [4400, 'agent','[Coder B] Implementing module_b.py…'],
+    [7000, 'chain','[chain] complete token=#2 (Coder A done) ✓'],
+    [7200, 'chain','[chain] complete token=#3 (Coder B done) ✓'],
+    [7400, 'agent','[ManagerAgent] Both coders done — delegating TEST token'],
+    [7900, 'chain','[chain] delegate → token #4 (TEST) parent=#1 ✓'],
+    [8100, 'agent','[TesterAgent] Writing integration tests for module_a + module_b…'],
+    [10000,'agent','[TesterAgent] Running pytest…'],
+    [10700,'chain','[chain] recordAction token=#4 TEST_RESULT_PASS ✓'],
+    [10900,'chain','[chain] complete token=#4 (Tester done) ✓'],
+    [11100,'chain','[chain] complete token=#1 (Manager done) ✓'],
+    [11300,'agent','═══ Pipeline complete — 4 DCTs on-chain ═══'],
+  ];
+  stages.forEach(([d,t,m])=>setTimeout(()=>log(t,m),d));
+
+  setTimeout(()=>{
+    log('warn','── To run for real (requires Ollama + Hardhat or Sepolia):');
+    const cmd=net==='sepolia'
+      ?`NETWORK=sepolia OLLAMA_MODEL="${model}" python agents/run_pipeline.py`
+      :`OLLAMA_MODEL="${model}" python agents/run_pipeline.py`;
+    log('dim',cmd);
+  },600);
+
+  setTimeout(()=>{
+    btn.disabled=false; btn.classList.remove('running');
+    btn.querySelector('span').textContent='▶ SHOW RUN DEMO';
+    refresh();
+  },12000);
+}
+
+log('dim','Dashboard ready — enter contract address and connect.');
+</script>
+</body>
+</html>
