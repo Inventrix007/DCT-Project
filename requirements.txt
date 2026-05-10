@@ -1,0 +1,4 @@
+langchain-core>=0.3
+langchain-ollama>=0.2
+web3>=7.0
+python-dotenv>=1.0
