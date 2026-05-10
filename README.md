@@ -151,6 +151,33 @@ The on-chain record shows all child tokens, their actions, and their completion 
 **Why Ollama?** The pipeline is fully open-source with no API keys or paid services
 required. Any model supported by Ollama works — swap via `OLLAMA_MODEL=<name>`.
 
+## Using the Dashboard
+
+`dct_dashboard.html` is a browser-based UI for inspecting the delegation tree and audit log without writing any code.
+
+### Local (Hardhat)
+
+1. Start the Hardhat node and deploy the contract (steps 4–5 above)
+2. Open `dct_dashboard.html` directly in your browser
+3. Select **Local** from the network dropdown
+4. Paste the contract address from `abi/DelegationRegistry.json`
+5. Click **Connect to Chain** — the delegation tree and action log will populate live
+
+### Sepolia (public, shareable)
+
+The `docs/index.html` version is identical but hosted on GitHub Pages so anyone can view it without running anything locally.
+
+1. Deploy to Sepolia and run the pipeline
+2. Open the GitHub Pages URL (e.g. `https://yourusername.github.io/BlockchainProject`)
+3. Enter any public Sepolia RPC URL (e.g. from [Alchemy](https://alchemy.com) or [Infura](https://infura.io))
+4. Paste the deployed contract address
+5. Click **Connect to Chain**
+
+The dashboard auto-refreshes every 15 seconds and shows:
+- Full delegation tree (root → coders → tester) with token status (active / completed / revoked)
+- Per-token action log with timestamps
+- Total DCTs minted and actions recorded
+
 ## Sepolia testnet deployment
 
 ```bash
