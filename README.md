@@ -164,20 +164,4 @@ npx hardhat run scripts/deploy.cjs --network sepolia
 
 # 4. Run
 NETWORK=sepolia python agents/run_pipeline.py
-```
-
-## Live dashboard (GitHub Pages)
-
-The `docs/index.html` dashboard is hosted at:
-`https://<your-github-username>.github.io/<repo-name>/`
-
-To view on-chain data: enter your Sepolia RPC URL and deployed contract address
-in the dashboard, then click **Connect**.
-
-## Extending this
-
-- Add a **Reviewer Agent** between Coder and Tester (needs a REVIEW scope)
-- Add **token expiry** — set `expiresAt` to enforce time-bounded delegation
-- Add **revocation** — the Manager can revoke a Coder's token mid-run
-- Add a **reputation system** — track pass rates per agent address on-chain
-- Scale to **N parallel coders** — the contract already supports arbitrary fan-out
+```![alt text](image.png)
